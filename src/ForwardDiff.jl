@@ -2,62 +2,93 @@ __precompile__()
 
 module ForwardDiff
 
-using DiffBase
-using DiffBase: DiffResult
-using StaticArrays
+using Cassette
 
-import NaNMath
-import SpecialFunctions
-import RealInterface
-import CommonSubexpressions
+@context DualCtx Dual
 
-#############################
-# types/functions/constants #
-#############################
+# imperative
 
-const NANSAFE_MODE_ENABLED = false
-
-const REAL_TYPES = (AbstractFloat, Irrational, Integer, Rational, Real)
-
-const DEFAULT_CHUNK_THRESHOLD = 10
-
-struct Chunk{N} end
-
-function Chunk(input_length::Integer, threshold::Integer = DEFAULT_CHUNK_THRESHOLD)
-    N = pickchunksize(input_length, threshold)
-    return Chunk{N}()
-end
-
-function Chunk(x::AbstractArray, threshold::Integer = DEFAULT_CHUNK_THRESHOLD)
-    return Chunk(length(x), threshold)
-end
-
-# Constrained to `N <= threshold`, minimize (in order of priority):
-#   1. the number of chunks that need to be computed
-#   2. the number of "left over" perturbations in the final chunk
-function pickchunksize(input_length, threshold = DEFAULT_CHUNK_THRESHOLD)
-    if input_length <= threshold
-        return input_length
+function (ctx::DualCtx{typeof(f)})(x)
+    if hascontext(ctx, x)
+        x, dx = unwrap(ctx, x)
+        return Dual(ctx, f(x), propagate(dfdx(x), dx))
     else
-        nchunks = round(Int, input_length / DEFAULT_CHUNK_THRESHOLD, RoundUp)
-        return round(Int, input_length / nchunks, RoundUp)
+        return f(x)
     end
 end
 
-############
-# includes #
-############
+function (ctx::DualCtx{typeof(f)})(x, y)
+    if hascontext(ctx, x) && hascontext(ctx, y)
+        x, dx = unwrap(ctx, x)
+        y, dy = unwrap(ctx, y)
+        return Dual(ctx, f(x, y), propagate(dfdx(x, y), dx, dfdy(x, y), dy))
+    elseif hascontext(ctx, x)
+        x, dx = unwrap(ctx, x)
+        return Dual(ctx, f(x, y), propagate(dfdx(x, y), dx)
+    elseif hascontext(ctx, y)
+        y, dy = unwrap(ctx, y)
+        return Dual(ctx, f(x, y), propagate(dfdy(x, y), dy)
+    else
+        return f(x, y)
+    end
+end
 
-include("partials.jl")
-include("dual.jl")
-include("config.jl")
-include("utils.jl")
-include("derivative.jl")
-include("gradient.jl")
-include("jacobian.jl")
-include("hessian.jl")
-include("deprecated.jl")
+# functional
 
-export DiffBase
+function (ctx::DualCtx{f})(x)
+    contextcall(ctx, x) do x, dx
+        return Dual(ctx, f(x), df(x) * dx)
+    end
+end
+
+# dispatch-based
+
+(ctx::DualCtx)(args...) = unwrapcall(ctx, args...)
+
+function (ctx::DualCtx{T,typeof(f)})(x::Dual{T}) where {T}
+    x, dx = unwrap(ctx, x)
+    return Dual(ctx, f(x), propagate(dfdx(x), dx))
+end
+
+function (ctx::DualCtx{T,typeof(f)})(x::Dual{T}, y::Dual{T}) where {T}
+    x, dx = unwrap(ctx, x)
+    y, dy = unwrap(ctx, y)
+    return Dual(ctx, f(x, y), propagate(dfdx(x, y), dx, dfdy(x, y), dy))
+end
+
+function (ctx::DualCtx{T,typeof(f)})(x::Dual{T}, y) where {T}
+    x, dx = unwrap(ctx, x)
+    return Dual(ctx, f(x, y), propagate(dfdx(x, y), dx)
+end
+
+function (ctx::DualCtx{T,typeof(f)})(x, y::Dual{T}) where {T}
+    y, dy = unwrap(ctx, y)
+    return Dual(ctx, f(x, y), propagate(dfdy(x, y), dy)
+end
+
+# dispatch-based + sugar
+
+@contextual (ctx::::DualCtx)(args...) = unwrapcall(ctx, args...)
+
+@contextual function (ctx::typeof(f)::DualCtx)(x::::Dual)
+    x, dx = unwrap(ctx, x)
+    return Dual(ctx, f(x), propagate(dfdx(x), dx))
+end
+
+@contextual function (ctx::typeof(f)::DualCtx)(x::::Dual, y::::Dual)
+    x, dx = unwrap(ctx, x)
+    y, dy = unwrap(ctx, y)
+    return Dual(ctx, f(x, y), propagate(dfdx(x, y), dx, dfdy(x, y), dy))
+end
+
+@contextual function (ctx::typeof(f)::DualCtx)(x::::Dual, y)
+    x, dx = unwrap(ctx, x)
+    return Dual(ctx, f(x, y), propagate(dfdx(x, y), dx)
+end
+
+@contextual function (ctx::typeof(f)::DualCtx)(x, y::::Dual)
+    y, dy = unwrap(ctx, y)
+    return Dual(ctx, f(x, y), propagate(dfdy(x, y), dy)
+end
 
 end # module
