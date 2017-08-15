@@ -70,25 +70,31 @@ end
 
 @contextual (ctx::::DualCtx)(args...) = unwrapcall(ctx, args...)
 
-@contextual function (ctx::typeof(f)::DualCtx)(x::::Dual)
-    x, dx = unwrap(ctx, x)
-    return Dual(ctx, f(x), propagate(dfdx(x), dx))
-end
-
-@contextual function (ctx::typeof(f)::DualCtx)(x::::Dual, y::::Dual)
-    x, dx = unwrap(ctx, x)
-    y, dy = unwrap(ctx, y)
-    return Dual(ctx, f(x, y), propagate(dfdx(x, y), dx, dfdy(x, y), dy))
-end
-
-@contextual function (ctx::typeof(f)::DualCtx)(x::::Dual, y)
-    x, dx = unwrap(ctx, x)
-    return Dual(ctx, f(x, y), propagate(dfdx(x, y), dx)
-end
-
-@contextual function (ctx::typeof(f)::DualCtx)(x, y::::Dual)
-    y, dy = unwrap(ctx, y)
-    return Dual(ctx, f(x, y), propagate(dfdy(x, y), dy)
-end
-
+for (f, arity) in PRIMITIVES
+    if arity == 1
+        dfdx = diffrule(f, arity)
+        @eval begin
+            @contextual function (ctx::typeof($f)::DualCtx)(x::::Dual)
+                x, dx = unwrap(ctx, x)
+                return Dual(ctx, $f(x), propagate($dfdx(x), dx))
+            end
+        end
+    elseif arity == 2
+        dfdx, dfdy = diffrule(f, arity)
+        @eval begin
+            @contextual function (ctx::typeof($f)::DualCtx)(x::::Dual, y::::Dual)
+                x, dx = unwrap(ctx, x)
+                y, dy = unwrap(ctx, y)
+                return Dual(ctx, $f(x, y), propagate($dfdx(x, y), dx, $dfdy(x, y), dy))
+            end
+            @contextual function (ctx::typeof($f)::DualCtx)(x::::Dual, y)
+                x, dx = unwrap(ctx, x)
+                return Dual(ctx, $f(x, y), propagate($dfdx(x, y), dx)
+            end
+            @contextual function (ctx::typeof($f)::DualCtx)(x, y::::Dual)
+                y, dy = unwrap(ctx, y)
+                return Dual(ctx, $f(x, y), propagate($dfdy(x, y), dy)
+            end
+        end
+    end
 end # module
