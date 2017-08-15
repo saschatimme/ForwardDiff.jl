@@ -97,4 +97,6 @@ for (f, arity) in PRIMITIVES
             end
         end
     end
+end
+
 end # module
