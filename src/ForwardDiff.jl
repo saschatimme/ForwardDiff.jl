@@ -6,6 +6,14 @@ using Cassette
 
 @context DualCtx Dual
 
+# functional
+
+function (ctx::DualCtx{f})(x)
+    contextcall(ctx, x) do x, dx
+        return Dual(ctx, f(x), df(x) * dx)
+    end
+end
+
 # imperative
 
 function (ctx::DualCtx{typeof(f)})(x)
@@ -24,20 +32,12 @@ function (ctx::DualCtx{typeof(f)})(x, y)
         return Dual(ctx, f(x, y), propagate(dfdx(x, y), dx, dfdy(x, y), dy))
     elseif hascontext(ctx, x)
         x, dx = unwrap(ctx, x)
-        return Dual(ctx, f(x, y), propagate(dfdx(x, y), dx)
+        return Dual(ctx, f(x, y), propagate(dfdx(x, y), dx))
     elseif hascontext(ctx, y)
         y, dy = unwrap(ctx, y)
-        return Dual(ctx, f(x, y), propagate(dfdy(x, y), dy)
+        return Dual(ctx, f(x, y), propagate(dfdy(x, y), dy))
     else
         return f(x, y)
-    end
-end
-
-# functional
-
-function (ctx::DualCtx{f})(x)
-    contextcall(ctx, x) do x, dx
-        return Dual(ctx, f(x), df(x) * dx)
     end
 end
 
@@ -58,12 +58,12 @@ end
 
 function (ctx::DualCtx{T,typeof(f)})(x::Dual{T}, y) where {T}
     x, dx = unwrap(ctx, x)
-    return Dual(ctx, f(x, y), propagate(dfdx(x, y), dx)
+    return Dual(ctx, f(x, y), propagate(dfdx(x, y), dx))
 end
 
 function (ctx::DualCtx{T,typeof(f)})(x, y::Dual{T}) where {T}
     y, dy = unwrap(ctx, y)
-    return Dual(ctx, f(x, y), propagate(dfdy(x, y), dy)
+    return Dual(ctx, f(x, y), propagate(dfdy(x, y), dy))
 end
 
 # dispatch-based + sugar
@@ -89,11 +89,11 @@ for (f, arity) in PRIMITIVES
             end
             @contextual function (ctx::typeof($f)::DualCtx)(x::::Dual, y)
                 x, dx = unwrap(ctx, x)
-                return Dual(ctx, $f(x, y), propagate($dfdx(x, y), dx)
+                return Dual(ctx, $f(x, y), propagate($dfdx(x, y), dx))
             end
             @contextual function (ctx::typeof($f)::DualCtx)(x, y::::Dual)
                 y, dy = unwrap(ctx, y)
-                return Dual(ctx, $f(x, y), propagate($dfdy(x, y), dy)
+                return Dual(ctx, $f(x, y), propagate($dfdy(x, y), dy))
             end
         end
     end
