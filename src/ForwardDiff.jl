@@ -2,101 +2,166 @@ __precompile__()
 
 module ForwardDiff
 
-using Cassette
+using Cassette: @context, @contextual, unwrapcall, value, meta, unwrap, hascontext
 
 @context DualCtx Dual
 
-# functional
+@contextual (ctx:::DualCtx)(args...) = unwrapcall(ctx, args...)
 
-function (ctx::DualCtx{f})(x)
-    contextcall(ctx, x) do x, dx
-        return Dual(ctx, f(x), df(x) * dx)
-    end
-end
-
-# imperative
-
-function (ctx::DualCtx{typeof(f)})(x)
-    if hascontext(ctx, x)
-        x, dx = unwrap(ctx, x)
-        return Dual(ctx, f(x), propagate(dfdx(x), dx))
-    else
-        return f(x)
-    end
-end
-
-function (ctx::DualCtx{typeof(f)})(x, y)
-    if hascontext(ctx, x) && hascontext(ctx, y)
-        x, dx = unwrap(ctx, x)
-        y, dy = unwrap(ctx, y)
-        return Dual(ctx, f(x, y), propagate(dfdx(x, y), dx, dfdy(x, y), dy))
-    elseif hascontext(ctx, x)
-        x, dx = unwrap(ctx, x)
-        return Dual(ctx, f(x, y), propagate(dfdx(x, y), dx))
-    elseif hascontext(ctx, y)
-        y, dy = unwrap(ctx, y)
-        return Dual(ctx, f(x, y), propagate(dfdy(x, y), dy))
-    else
-        return f(x, y)
-    end
-end
-
-# dispatch-based
-
-(ctx::DualCtx)(args...) = unwrapcall(ctx, args...)
-
-function (ctx::DualCtx{T,typeof(f)})(x::Dual{T}) where {T}
-    x, dx = unwrap(ctx, x)
-    return Dual(ctx, f(x), propagate(dfdx(x), dx))
-end
-
-function (ctx::DualCtx{T,typeof(f)})(x::Dual{T}, y::Dual{T}) where {T}
-    x, dx = unwrap(ctx, x)
-    y, dy = unwrap(ctx, y)
-    return Dual(ctx, f(x, y), propagate(dfdx(x, y), dx, dfdy(x, y), dy))
-end
-
-function (ctx::DualCtx{T,typeof(f)})(x::Dual{T}, y) where {T}
-    x, dx = unwrap(ctx, x)
-    return Dual(ctx, f(x, y), propagate(dfdx(x, y), dx))
-end
-
-function (ctx::DualCtx{T,typeof(f)})(x, y::Dual{T}) where {T}
-    y, dy = unwrap(ctx, y)
-    return Dual(ctx, f(x, y), propagate(dfdy(x, y), dy))
-end
-
-# dispatch-based + sugar
-
-@contextual (ctx::::DualCtx)(args...) = unwrapcall(ctx, args...)
+#######################
+# imperative approach #
+#######################
 
 for (f, arity) in PRIMITIVES
     if arity == 1
         dfdx = diffrule(f, arity)
         @eval begin
-            @contextual function (ctx::typeof($f)::DualCtx)(x::::Dual)
-                x, dx = unwrap(ctx, x)
-                return Dual(ctx, $f(x), propagate($dfdx(x), dx))
+            @contextual function (ctx::typeof($f):DualCtx)(x)
+                if hascontext(ctx, x)
+                    vx, dx = value(ctx, x), meta(ctx, x)
+                    return Dual(ctx, $f(vx), propagate($dfdx(vx), dx))
+                else
+                    return $f(x)
+                end
             end
         end
     elseif arity == 2
         dfdx, dfdy = diffrule(f, arity)
         @eval begin
-            @contextual function (ctx::typeof($f)::DualCtx)(x::::Dual, y::::Dual)
-                x, dx = unwrap(ctx, x)
-                y, dy = unwrap(ctx, y)
-                return Dual(ctx, $f(x, y), propagate($dfdx(x, y), dx, $dfdy(x, y), dy))
-            end
-            @contextual function (ctx::typeof($f)::DualCtx)(x::::Dual, y)
-                x, dx = unwrap(ctx, x)
-                return Dual(ctx, $f(x, y), propagate($dfdx(x, y), dx))
-            end
-            @contextual function (ctx::typeof($f)::DualCtx)(x, y::::Dual)
-                y, dy = unwrap(ctx, y)
-                return Dual(ctx, $f(x, y), propagate($dfdy(x, y), dy))
+            @contextual function (ctx::typeof($f):DualCtx)(x, y)
+                if hascontext(ctx, x) && hascontext(ctx, y)
+                    vx, dx = value(ctx, x), meta(ctx, x)
+                    vy, dy = value(ctx, y), meta(ctx, y)
+                    return Dual(ctx, $f(vx, vy), propagate($dfdx(vx, vy), dx, $dfdy(vx, vy), dy))
+                elseif hascontext(ctx, x)
+                    vx, dx = value(ctx, x), meta(ctx, x)
+                    return Dual(ctx, $f(vx, y), propagate($dfdx(vx, y), dx))
+                elseif hascontext(ctx, y)
+                    vy, dy = value(ctx, x), meta(ctx, x)
+                    return Dual(ctx, $f(x, vy), propagate($dfdy(x, vy), dy))
+                else
+                    return $f(x, y)
+                end
             end
         end
     end
 end
 
-end # module
+#####################
+# dispatch approach #
+#####################
+
+for (f, arity) in PRIMITIVES
+    if arity == 1
+        dfdx = diffrule(f, arity)
+        @eval begin
+            @contextual function (ctx::typeof($f):DualCtx)(x:::Dual)
+                vx, dx = value(ctx, x), meta(ctx, x)
+                return Dual(ctx, $f(vx), propagate($dfdx(vx), dx))
+            end
+        end
+    elseif arity == 2
+        dfdx, dfdy = diffrule(f, arity)
+        @eval begin
+            @contextual function (ctx::typeof($f):DualCtx)(x:::Dual, y:::Dual)
+                vx, dx = value(ctx, x), meta(ctx, x)
+                vy, dy = value(ctx, y), meta(ctx, y)
+                return Dual(ctx, $f(vx, vy), propagate($dfdx(vx, vy), dx, $dfdy(vx, vy), dy))
+            end
+            @contextual function (ctx::typeof($f):DualCtx)(x:::Dual, y)
+                vx, dx = value(ctx, x), meta(ctx, x)
+                return Dual(ctx, $f(vx, y), propagate($dfdx(vx, y), dx))
+            end
+            @contextual function (ctx::typeof($f):DualCtx)(x, y:::Dual)
+                vy, dy = value(ctx, x), meta(ctx, x)
+                return Dual(ctx, $f(x, vy), propagate($dfdy(x, vy), dy))
+            end
+        end
+    end
+end
+
+# The above is lowered into something like the below:
+
+#=
+for (f, arity) in PRIMITIVES
+    if arity == 1
+        dfdx = diffrule(f, arity)
+        @eval begin
+            function (ctx::DualCtx{T,typeof(f)})(x::Dual{T}) where {T}
+                vx, dx = value(ctx, x), meta(ctx, x)
+                return Dual(ctx, $f(vx), propagate($dfdx(vx), dx))
+            end
+        end
+    elseif arity == 2
+        dfdx, dfdy = diffrule(f, arity)
+        @eval begin
+            function (ctx::DualCtx{T,typeof(f)})(x::Dual{T}, y::Dual{T}) where {T}
+                vx, dx = value(ctx, x), meta(ctx, x)
+                vy, dy = value(ctx, y), meta(ctx, y)
+                return Dual(ctx, $f(vx, vy), propagate($dfdx(vx, vy), dx, $dfdy(vx, vy), dy))
+            end
+            function (ctx::DualCtx{T,typeof(f)})(x::Dual{T}, y) where {T}
+                vx, dx = value(ctx, x), meta(ctx, x)
+                return Dual(ctx, $f(vx, y), propagate($dfdx(vx, y), dx))
+            end
+            function (ctx::DualCtx{T,typeof(f)})(x, y::Dual{T}) where {T}
+                vy, dy = value(ctx, x), meta(ctx, x)
+                return Dual(ctx, $f(x, vy), propagate($dfdy(x, vy), dy))
+            end
+        end
+    end
+end
+=#
+
+#######################
+# functional approach #
+#######################
+
+for (f, arity) in PRIMITIVES
+    if arity == 1
+        dfdx = diffrule(f, arity)
+        @eval begin
+            @contextual function (ctx::typeof($f):DualCtx)(x)
+                contextcall($f, ctx, x) do x, dx
+                    return Dual(ctx, $f(x), propagate($dfdx(x), dx))
+                end
+            end
+        end
+    elseif arity == 2
+        dfdx, dfdy = diffrule(f, arity)
+        @eval begin
+            @contextual function (ctx::typeof($f):DualCtx)(x, y)
+                contextcall(
+                    function (vx, dx)
+                        contextcall(
+                            function (vy, dy)
+                                Dual(ctx, $f(vx, vy), propagate($dfdx(vx, vy), dx, $dfdy(vx, vy), dy))
+                            end,
+                            function (y)
+                                Dual(ctx, $f(vx, y), propagate($dfdx(vx, y), dx))
+                            end,
+                            ctx,
+                            y
+                        )
+                    end,
+                    function (x)
+                        contextcall(
+                            function (vy, dy)
+                                Dual(ctx, $f(x, vy), propagate($dfdy(x, vy), dy))
+                            end,
+                            function (y)
+                                $f(x, y)
+                            end,
+                            ctx,
+                            y
+                        )
+                    end,
+                    ctx,
+                    x
+                )
+            end
+        end
+    end
+end
+
+end # module ForwardDiff
