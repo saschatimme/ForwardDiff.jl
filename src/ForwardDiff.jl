@@ -37,4 +37,8 @@ for (M, f, arity) in PRIMITIVES
     end
 end
 
+propagate(dfdx::Number, dx::AbstractVector) = dfdx * dx
+
+propagate(dfdx::Number, dx::AbstractVector, dfdy::Number, dy::AbstractVector) = propagate(dfdx, dx) + propagate(dfdy, dy)
+
 end # module ForwardDiff
