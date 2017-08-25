@@ -20,6 +20,24 @@ implementation can compute the correct result even in the presence of perturbati
 contexts can be completely unaware of `DiffCtx` and still compose correctly.
 
 TODO: What happens when the target function stores values in an array?
+
+The idea is to wrap EVERY non-isbits variable with a lightweight wrapper with an
+uninitialized metadata storage field that can be instantiated later. The type of
+this storage is a kind of dict (maybe immutable? named tuple?) where the keys are
+the original access point (field name, array index etc.) and the value type is
+the union of possible meta data types. Then, every call to either `arrayset!`
+and `setfield!` (Julia's lowest level mutating primitives) can store metadata
+in this dict for later retrieval.
+
+@contextual DiffCtx function @ctx(c)(args...)
+    output = Cassette.ctxcall(unwrap(c), c, args...)
+    if isbits(typeof(output))
+        return output
+    else
+        return wrap(c, output)
+    end
+end
+
 =#
 
 using Cassette: @context, @primitive, unwrap, meta, CtxVar
@@ -27,6 +45,8 @@ using SpecialFunctions
 using DiffRules # see https://github.com/JuliaDiff/DiffRules.jl
 
 @context DiffCtx
+
+
 
 for (M, f, arity) in DiffRules.diffrules()
     if arity == 1
