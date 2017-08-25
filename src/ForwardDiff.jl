@@ -2,36 +2,56 @@ __precompile__()
 
 module ForwardDiff
 
-using Cassette: @context, @primitive, value, meta
+#=
+This is a mock implementation of forward-mode AD using Cassette. This code does not
+actually run yet, but it hopefully will in a week or so.
+
+The below implementation constitutes a nearly complete replacement of ForwardDiff's dual
+numbers for unary and binary functions. Besides being drastically simpler code, note in
+particular the following advantages:
+
+- It doesn't require any extraneous method overloads, such as hashing, conversion/promotion
+predicates, irrelevant numeric methods (e.g. `one`/`zero`).
+
+- Safe nested differentiation is baked in, since metadata extraction is contextualized. This
+implementation can compute the correct result even in the presence of perturbation confusion.
+
+- It doesn't require dealing with any type ambiguities; new types and even other Cassette
+contexts can be completely unaware of `DiffCtx` and still compose correctly.
+
+TODO: What happens when the target function stores values in an array?
+=#
+
+using Cassette: @context, @primitive, unwrap, meta, CtxVar
 using SpecialFunctions
-using DiffRules
+using DiffRules # see https://github.com/JuliaDiff/DiffRules.jl
 
-@context DualCtx
+@context DiffCtx
 
-for (M, f, arity) in PRIMITIVES
+for (M, f, arity) in DiffRules.diffrules()
     if arity == 1
-        dfdx = diffrule(M, f, :vx)
+        dfdx = DiffRules.diffrule(M, f, :vx)
         @eval begin
-            @primitive DualCtx function @ctx(c::typeof($f))(@ctx(x))
-                vx, dx = value(c, x), meta(c, x)
-                return Dual(c, $f(vx), propagate($dfdx, dx))
+            @primitive DiffCtx function @ctx(c::typeof($f))(@ctx(x))
+                vx, dx = unwrap(c, x), meta(c, x)
+                return CtxVar(c, $f(vx), propagate($dfdx, dx))
             end
         end
     elseif arity == 2
-        dfdx, dfdy = diffrule(M, f, :vx, :vy)
+        dfdx, dfdy = DiffRules.diffrule(M, f, :vx, :vy)
         @eval begin
-            @primitive DualCtx function @ctx(c::typeof($f))(@ctx(x), @ctx(y))
-                vx, dx = value(c, x), meta(c, x)
-                vy, dy = value(c, y), meta(c, y)
-                return Dual(c, $f(vx, vy), propagate($dfdx, dx, $dfdy, dy))
+            @primitive DiffCtx function @ctx(c::typeof($f))(@ctx(x), @ctx(y))
+                vx, dx = unwrap(c, x), meta(c, x)
+                vy, dy = unwrap(c, y), meta(c, y)
+                return CtxVar(c, $f(vx, vy), propagate($dfdx, dx, $dfdy, dy))
             end
-            @primitive DualCtx function @ctx(c::typeof($f))(@ctx(x), vy)
-                vx, dx = value(c, x), meta(c, x)
-                return Dual(c, $f(vx, y), propagate($dfdx, dx))
+            @primitive DiffCtx function @ctx(c::typeof($f))(@ctx(x), vy)
+                vx, dx = unwrap(c, x), meta(c, x)
+                return CtxVar(c, $f(vx, y), propagate($dfdx, dx))
             end
-            @primitive DualCtx function @ctx(c::typeof($f))(vx, @ctx(y))
-                vy, dy = value(c, x), meta(c, x)
-                return Dual(c, $f(x, vy), propagate($dfdy, dy))
+            @primitive DiffCtx function @ctx(c::typeof($f))(vx, @ctx(y))
+                vy, dy = unwrap(c, x), meta(c, x)
+                return CtxVar(c, $f(x, vy), propagate($dfdy, dy))
             end
         end
     end
