@@ -40,38 +40,36 @@ end
 
 =#
 
-using Cassette: @context, @primitive, unwrap, meta, CtxVar
+using Cassette: @context, @primitive, value, meta, Meta
 using SpecialFunctions
 using DiffRules # see https://github.com/JuliaDiff/DiffRules.jl
 
 @context DiffCtx
 
-
-
 for (M, f, arity) in DiffRules.diffrules()
     if arity == 1
         dfdx = DiffRules.diffrule(M, f, :vx)
         @eval begin
-            @primitive DiffCtx function @ctx(c::typeof($f))(@ctx(x))
-                vx, dx = unwrap(c, x), meta(c, x)
-                return CtxVar(c, $f(vx), propagate($dfdx, dx))
+            @primitive ctx::DiffCtx function (::typeof($f))(x::@Meta)
+                vx, dx = value(ctx, x), meta(ctx, x)
+                return Meta(ctx, $f(vx), propagate($dfdx, dx))
             end
         end
     elseif arity == 2
         dfdx, dfdy = DiffRules.diffrule(M, f, :vx, :vy)
         @eval begin
-            @primitive DiffCtx function @ctx(c::typeof($f))(@ctx(x), @ctx(y))
-                vx, dx = unwrap(c, x), meta(c, x)
-                vy, dy = unwrap(c, y), meta(c, y)
-                return CtxVar(c, $f(vx, vy), propagate($dfdx, dx, $dfdy, dy))
+            @primitive ctx::DiffCtx function (::typeof($f))(x::@Meta, y::@Meta)
+                vx, dx = value(ctx, x), meta(ctx, x)
+                vy, dy = value(ctx, y), meta(ctx, y)
+                return Meta(ctx, $f(vx, vy), propagate($dfdx, dx, $dfdy, dy))
             end
-            @primitive DiffCtx function @ctx(c::typeof($f))(@ctx(x), vy)
-                vx, dx = unwrap(c, x), meta(c, x)
-                return CtxVar(c, $f(vx, y), propagate($dfdx, dx))
+            @primitive ctx::DiffCtx function (::typeof($f))(x::@Meta, vy)
+                vx, dx = unwrap(ctx, x), meta(ctx, x)
+                return Meta(ctx, $f(vx, y), propagate($dfdx, dx))
             end
-            @primitive DiffCtx function @ctx(c::typeof($f))(vx, @ctx(y))
-                vy, dy = unwrap(c, x), meta(c, x)
-                return CtxVar(c, $f(x, vy), propagate($dfdy, dy))
+            @primitive ctx::DiffCtx function (::typeof($f))(vx, y::@Meta)
+                vy, dy = unwrap(ctx, x), meta(ctx, x)
+                return Meta(ctx, $f(x, vy), propagate($dfdy, dy))
             end
         end
     end
