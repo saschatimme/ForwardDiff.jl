@@ -30,7 +30,7 @@ and `setfield!` (Julia's lowest level mutating primitives) can store metadata
 in this dict for later retrieval.
 
 @contextual DiffCtx function @ctx(c)(args...)
-    output = Cassette.ctxcall(unwrap(c), c, args...)
+    output = Cassette.ctxcall(value(c), c, args...)
     if isbits(typeof(output))
         return output
     else
@@ -40,7 +40,7 @@ end
 
 =#
 
-using Cassette: @context, @primitive, value, meta, Meta
+using Cassette: @context, @primitive, value, meta, Meta, @execute
 using SpecialFunctions
 using DiffRules # see https://github.com/JuliaDiff/DiffRules.jl
 
@@ -64,12 +64,12 @@ for (M, f, arity) in DiffRules.diffrules()
                 return Meta(ctx, $f(vx, vy), propagate($dfdx, dx, $dfdy, dy))
             end
             @primitive ctx::DiffCtx function (::typeof($f))(x::@Meta, vy)
-                vx, dx = unwrap(ctx, x), meta(ctx, x)
-                return Meta(ctx, $f(vx, y), propagate($dfdx, dx))
+                vx, dx = value(ctx, x), meta(ctx, x)
+                return Meta(ctx, $f(vx, vy), propagate($dfdx, dx))
             end
             @primitive ctx::DiffCtx function (::typeof($f))(vx, y::@Meta)
-                vy, dy = unwrap(ctx, x), meta(ctx, x)
-                return Meta(ctx, $f(x, vy), propagate($dfdy, dy))
+                vy, dy = value(ctx, y), meta(ctx, y)
+                return Meta(ctx, $f(vx, vy), propagate($dfdy, dy))
             end
         end
     end
