@@ -1,4 +1,4 @@
-__precompile__()
+# __precompile__()
 
 module ForwardDiff
 
@@ -40,7 +40,7 @@ end
 
 =#
 
-using Cassette: @context, @primitive, value, meta, Meta, @execute
+using Cassette: @context, @primitive, value, meta, MetaValue, Execute, @execute
 using SpecialFunctions
 using DiffRules # see https://github.com/JuliaDiff/DiffRules.jl
 
@@ -50,26 +50,26 @@ for (M, f, arity) in DiffRules.diffrules()
     if arity == 1
         dfdx = DiffRules.diffrule(M, f, :vx)
         @eval begin
-            @primitive ctx::DiffCtx function (::typeof($f))(x::@Meta)
+            @primitive ctx::DiffCtx function (::typeof($f))(x::@MetaValue)
                 vx, dx = value(ctx, x), meta(ctx, x)
-                return Meta(ctx, $f(vx), propagate($dfdx, dx))
+                return MetaValue(ctx, $f(vx), propagate($dfdx, dx))
             end
         end
     elseif arity == 2
         dfdx, dfdy = DiffRules.diffrule(M, f, :vx, :vy)
         @eval begin
-            @primitive ctx::DiffCtx function (::typeof($f))(x::@Meta, y::@Meta)
+            @primitive ctx::DiffCtx function (::typeof($f))(x::@MetaValue, y::@MetaValue)
                 vx, dx = value(ctx, x), meta(ctx, x)
                 vy, dy = value(ctx, y), meta(ctx, y)
-                return Meta(ctx, $f(vx, vy), propagate($dfdx, dx, $dfdy, dy))
+                return MetaValue(ctx, $f(vx, vy), propagate($dfdx, dx, $dfdy, dy))
             end
-            @primitive ctx::DiffCtx function (::typeof($f))(x::@Meta, vy)
+            @primitive ctx::DiffCtx function (::typeof($f))(x::@MetaValue, vy)
                 vx, dx = value(ctx, x), meta(ctx, x)
-                return Meta(ctx, $f(vx, vy), propagate($dfdx, dx))
+                return MetaValue(ctx, $f(vx, vy), propagate($dfdx, dx))
             end
-            @primitive ctx::DiffCtx function (::typeof($f))(vx, y::@Meta)
+            @primitive ctx::DiffCtx function (::typeof($f))(vx, y::@MetaValue)
                 vy, dy = value(ctx, y), meta(ctx, y)
-                return Meta(ctx, $f(vx, vy), propagate($dfdy, dy))
+                return MetaValue(ctx, $f(vx, vy), propagate($dfdy, dy))
             end
         end
     end
@@ -78,5 +78,32 @@ end
 propagate(dfdx::Number, dx::AbstractVector) = dfdx * dx
 
 propagate(dfdx::Number, dx::AbstractVector, dfdy::Number, dy::AbstractVector) = propagate(dfdx, dx) + propagate(dfdy, dy)
+
+############################################################################################
+
+function rosenbrock!(x#=::Vector{Float64}=#)
+    a = one(eltype(x))
+    y = zeros(length(x))
+    b = 100.0
+    result = 0.0
+    for i in 1:length(x)-1
+        x[i] = (a - x[i])^2 + b*(x[i+1] - x[i]^2)^2
+        y[i] = x[i]
+        result += x[i]
+    end
+    x[end] = 0.0
+    @assert sum(x) == sum(y) == result
+    return result
+end
+
+# function gradient(f, x)
+#     @assert length(x) == 3
+#     ctx = DiffCtx(f)
+#     dx = MetaContainer(ctx, x, )
+#     dx = [MetaValue(ctx, x[1], [1.,0.,0.]),
+#           MetaValue(ctx, x[2], [0.,1.,0.]),
+#           MetaValue(ctx, x[3], [0.,0.,1.])]
+#     return Execute(ctx, nothing, f)(dx)
+# end
 
 end # module ForwardDiff
